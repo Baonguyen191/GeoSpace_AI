@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f1e8" />
+    <meta
+      name="description"
+      content="GeoSpace — dựng hình học không gian trực quan từ đề bài."
+    />
+    <title>GeoSpace — Dựng hình không gian</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="chat-panel" aria-label="Trợ lý hình học">
+        <header class="chat-header">
+          <a class="brand" href="#" aria-label="GeoSpace, trang chủ">
+            <span class="brand-mark" aria-hidden="true">
+              <i></i><i></i><i></i><i></i>
+            </span>
+            <span class="brand-copy">
+              <strong>GeoSpace</strong>
+              <small>Trợ lý hình học</small>
+            </span>
+          </a>
+          <button id="new-problem" class="new-problem-button" type="button">Bài mới</button>
+        </header>
+
+        <div class="problem-context">
+          <span class="context-indicator" aria-hidden="true"></span>
+          <span id="shape-status">Sẵn sàng</span>
+        </div>
+
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+
+        <div class="composer">
+          <label class="sr-only" for="problem-input">Nhập đề bài hoặc câu hỏi</label>
+          <div class="math-toolbar" role="toolbar" aria-label="Chèn ký hiệu toán học">
+            <span class="math-toolbar-label">Ký hiệu</span>
+            <div class="math-symbols">
+              <button type="button" data-symbol=" ∥ " aria-label="Song song" title="Song song">∥</button>
+              <button type="button" data-symbol=" ⟂ " aria-label="Vuông góc" title="Vuông góc">⟂</button>
+              <button type="button" data-symbol=" ∈ " aria-label="Thuộc" title="Thuộc">∈</button>
+              <button type="button" data-symbol=" ∉ " aria-label="Không thuộc" title="Không thuộc">∉</button>
+              <button type="button" data-symbol=" ∩ " aria-label="Giao" title="Giao">∩</button>
+              <button type="button" data-symbol=" ∪ " aria-label="Hợp" title="Hợp">∪</button>
+              <button type="button" data-symbol="∠" aria-label="Góc" title="Góc">∠</button>
+              <button type="button" data-symbol="△" aria-label="Tam giác" title="Tam giác">△</button>
+              <button type="button" data-symbol=" → " aria-label="Suy ra" title="Suy ra">→</button>
+              <button type="button" data-symbol=" ≡ " aria-label="Trùng nhau" title="Trùng nhau">≡</button>
+              <button type="button" data-symbol=" ≠ " aria-label="Khác" title="Khác">≠</button>
+              <button type="button" data-symbol=" ⊂ " aria-label="Là tập con" title="Là tập con">⊂</button>
+              <button type="button" data-symbol=" ≤ " aria-label="Nhỏ hơn hoặc bằng" title="Nhỏ hơn hoặc bằng">≤</button>
+              <button type="button" data-symbol=" ≥ " aria-label="Lớn hơn hoặc bằng" title="Lớn hơn hoặc bằng">≥</button>
+              <button type="button" data-symbol="²" aria-label="Bình phương" title="Bình phương">x²</button>
+            </div>
+          </div>
+          <textarea id="problem-input" rows="4" spellcheck="false" placeholder="Nhập đề bài hoặc câu hỏi..."></textarea>
+          <div class="composer-actions">
+            <button id="explain-button" class="explain-button" type="button">
+              <span aria-hidden="true">✦</span>
+              <span class="explain-label">Giảng bài</span>
+              <span class="button-loader" aria-hidden="true"></span>
+            </button>
+            <button id="draw-button" class="draw-button" type="button">
+              <span class="button-label">Dựng hình</span>
+              <span class="button-loader" aria-hidden="true"></span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <p id="parser-note" class="sr-only" role="status"></p>
+        </div>
+      </aside>
+
+      <section class="stage" aria-label="Khung hình học không gian">
+        <header class="scene-toolbar">
+          <span>Không gian 3D</span>
+          <div class="scene-actions">
+            <button id="toggle-grid" class="icon-button" type="button" aria-pressed="true">
+              <span class="grid-icon" aria-hidden="true"></span>
+              <span>Lưới</span>
+            </button>
+            <button id="reset-view" class="icon-button" type="button">
+              <span class="reset-icon" aria-hidden="true">↺</span>
+              <span>Đặt lại</span>
+            </button>
+          </div>
+        </header>
+        <div id="canvas-wrap" class="canvas-wrap"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
