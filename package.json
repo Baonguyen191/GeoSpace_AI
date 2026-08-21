@@ -9,6 +9,7 @@
     "start": "node --env-file=.env server.js --production"
   },
   "dependencies": {
+    "busboy": "^1.6.0",
     "katex": "^0.18.4",
     "three": "^0.179.1"
   },

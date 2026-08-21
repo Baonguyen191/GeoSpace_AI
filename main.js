@@ -16,12 +16,38 @@ const parserNote = document.querySelector("#parser-note");
 const chatLog = document.querySelector("#chat-log");
 const buttonLabel = drawButton.querySelector(".button-label");
 const explainLabel = explainButton.querySelector(".explain-label");
+const explainIcon = explainButton.querySelector("span:first-child");
 const newProblemButton = document.querySelector("#new-problem");
 const mathSymbolButtons = document.querySelectorAll("[data-symbol]");
+const mathToggleButton = document.querySelector("#math-toggle");
+const mathPopover = document.querySelector("#math-popover");
+const problemImageInput = document.querySelector("#problem-image");
+const imageUploadButton = document.querySelector(".image-upload-button");
+const imageUploadLabel = document.querySelector("#image-upload-label");
+const ocrPreview = document.querySelector("#ocr-preview");
+const ocrPreviewImage = document.querySelector("#ocr-preview-image");
+const ocrFileName = document.querySelector("#ocr-file-name");
+const ocrStatus = document.querySelector("#ocr-status");
+const removeImageButton = document.querySelector("#remove-image");
+const motionControls = document.querySelector("#motion-controls");
+const motionControlList = document.querySelector("#motion-control-list");
+const problemStatement = document.querySelector("#problem-statement");
+const problemStatementContent = document.querySelector("#problem-statement-content");
+const problemToggle = document.querySelector("#problem-toggle");
+const measurementPanel = document.querySelector("#measurement-panel");
+const measurementSheetBody = document.querySelector("#measurement-sheet-body");
+const measurementStatus = document.querySelector("#measurement-status");
+const measurementToggle = document.querySelector("#toggle-measurements");
+const measurementClose = document.querySelector("#close-measurements");
+const measurementCount = document.querySelector("#measurement-count");
 const defaultProblem = problemInput.value;
 const storageKey = "geospace-current-problem-v1";
 let currentSession = createEmptySession();
+let problemExpanded = false;
+let measurementPanelOpen = false;
 let statusBeforeLoading = "Sẵn sàng";
+let ocrPreviewUrl = null;
+let ocrController = null;
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
@@ -354,7 +380,7 @@ function fitCameraToPoints(points) {
   const size = box.getSize(new THREE.Vector3());
   const radius = Math.max(size.x, size.y, size.z, 1) * 0.62;
   const direction = new THREE.Vector3(0.63, 0.48, 0.72).normalize();
-  const distance = Math.max(6, radius / Math.sin(THREE.MathUtils.degToRad(camera.fov * 0.5)) * 1.15);
+  const distance = Math.max(6, radius / Math.sin(THREE.MathUtils.degToRad(camera.fov * 0.5)) * 1.32);
 
   camera.position.copy(center).addScaledVector(direction, distance);
   controls.target.copy(center);
@@ -364,10 +390,416 @@ function fitCameraToPoints(points) {
   controls.update();
 }
 
-function buildAiGeometry(geometry) {
+function getMovablePoints(geometry) {
+  const labels = new Set((geometry.points || []).map((point) => point.label));
+  return (geometry.points || []).filter((point) => (
+    point.movable
+    && point.path_from
+    && point.path_to
+    && point.path_from !== point.path_to
+    && point.label !== point.path_from
+    && point.label !== point.path_to
+    && labels.has(point.path_from)
+    && labels.has(point.path_to)
+  ));
+}
+
+function setPointOnMovementPath(geometry, point, ratio) {
+  const from = geometry.points.find((candidate) => candidate.label === point.path_from);
+  const to = geometry.points.find((candidate) => candidate.label === point.path_to);
+  if (!from || !to) return false;
+
+  const safeRatio = THREE.MathUtils.clamp(Number(ratio) || 0, 0, 1);
+  point.position_ratio = safeRatio;
+  point.x = THREE.MathUtils.lerp(Number(from.x), Number(to.x), safeRatio);
+  point.y = THREE.MathUtils.lerp(Number(from.y), Number(to.y), safeRatio);
+  point.z = THREE.MathUtils.lerp(Number(from.z), Number(to.z), safeRatio);
+  return true;
+}
+
+function clearMotionControls() {
+  motionControlList.replaceChildren();
+  motionControls.hidden = true;
+}
+
+function updateProblemStatement() {
+  const problem = String(currentSession.originalProblem || "").trim();
+  problemStatement.hidden = !problem;
+  problemStatementContent.innerHTML = problem ? renderChatContent(problem) : "";
+  problemStatement.classList.toggle("is-expanded", problemExpanded);
+  problemToggle.setAttribute("aria-expanded", String(problemExpanded));
+  problemToggle.textContent = problemExpanded ? "Thu gọn" : "Mở rộng";
+}
+
+function getGeometryPoint(geometry, label) {
+  return geometry.points.find((point) => point.label === label);
+}
+
+function geometryPointVector(point) {
+  return new THREE.Vector3(Number(point.x), Number(point.y), Number(point.z));
+}
+
+function setGeometryPointVector(point, vector) {
+  point.x = Number(vector.x.toFixed(6));
+  point.y = Number(vector.y.toFixed(6));
+  point.z = Number(vector.z.toFixed(6));
+}
+
+function getLengthTargets(geometry) {
+  const seen = new Set();
+  return geometry.edges.flatMap((edge) => {
+    const from = getGeometryPoint(geometry, edge.from);
+    const to = getGeometryPoint(geometry, edge.to);
+    const key = [edge.from, edge.to].sort().join("|");
+    if (!from || !to || from === to || seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      type: "length",
+      label: `${edge.from}${edge.to}`,
+      from: edge.from,
+      to: edge.to,
+    }];
+  });
+}
+
+function getAngleTargets(geometry) {
+  const neighbors = new Map();
+  geometry.edges.forEach((edge) => {
+    if (!getGeometryPoint(geometry, edge.from) || !getGeometryPoint(geometry, edge.to)) return;
+    if (!neighbors.has(edge.from)) neighbors.set(edge.from, new Set());
+    if (!neighbors.has(edge.to)) neighbors.set(edge.to, new Set());
+    neighbors.get(edge.from).add(edge.to);
+    neighbors.get(edge.to).add(edge.from);
+  });
+
+  const targets = [];
+  neighbors.forEach((connectedLabels, vertex) => {
+    const connected = [...connectedLabels].sort();
+    for (let left = 0; left < connected.length; left += 1) {
+      for (let right = left + 1; right < connected.length; right += 1) {
+        targets.push({
+          type: "angle",
+          label: `∠${connected[left]}${vertex}${connected[right]}`,
+          a: connected[left],
+          vertex,
+          c: connected[right],
+        });
+      }
+    }
+  });
+  return targets.slice(0, 80);
+}
+
+function measurementTargetKey(target) {
+  if (!target) return "";
+  return target.type === "length"
+    ? `length:${[target.from, target.to].sort().join("-")}`
+    : `angle:${target.a}-${target.vertex}-${target.c}`;
+}
+
+function saveMeasurementConstraint(target, value) {
+  const key = measurementTargetKey(target);
+  const measurements = (currentSession.measurements || []).filter((measurement) => measurement.key !== key);
+  measurements.push({ key, type: target.type, label: target.label, value });
+  currentSession.measurements = measurements.slice(-80);
+}
+
+function getMeasurementContext() {
+  if (!currentSession.measurements?.length) return "";
+  const values = currentSession.measurements
+    .map((measurement) => `${measurement.label} = ${measurement.value}${measurement.type === "angle" && !String(measurement.value).includes("°") ? "°" : ""}`)
+    .join("; ");
+  return `Số đo người dùng đã đặt: ${values}.`;
+}
+
+function getProblemWithMeasurements() {
+  return [currentSession.originalProblem, getMeasurementContext()].filter(Boolean).join("\n");
+}
+
+function normalizeMeasurementLabel(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/^GÓC\s*/u, "∠")
+    .replace(/\s+/g, "");
+}
+
+function findMeasurementTarget(geometry, label) {
+  const normalized = normalizeMeasurementLabel(label);
+  const lengthTarget = getLengthTargets(geometry).find((target) => (
+    normalizeMeasurementLabel(target.label) === normalized
+    || normalizeMeasurementLabel(`${target.to}${target.from}`) === normalized
+  ));
+  if (lengthTarget) return lengthTarget;
+  return getAngleTargets(geometry).find((target) => (
+    normalizeMeasurementLabel(target.label) === normalized
+    || normalizeMeasurementLabel(`∠${target.c}${target.vertex}${target.a}`) === normalized
+  )) || null;
+}
+
+function renderMeasurementPanel(geometry) {
+  const hasGeometry = Boolean(geometry?.points?.length && geometry?.edges?.length);
+  measurementToggle.disabled = !hasGeometry;
+  const count = currentSession.measurements?.length || 0;
+  measurementCount.textContent = String(count);
+  measurementCount.hidden = count === 0;
+  measurementToggle.setAttribute("aria-expanded", String(hasGeometry && measurementPanelOpen));
+  if (!hasGeometry || !measurementPanelOpen) {
+    measurementPanel.hidden = true;
+    return;
+  }
+  measurementPanel.hidden = false;
+  measurementSheetBody.replaceChildren();
+  const savedMeasurements = currentSession.measurements || [];
+  const rowCount = Math.max(6, savedMeasurements.length + 1);
+
+  for (let index = 0; index < rowCount; index += 1) {
+    const savedMeasurement = savedMeasurements[index] || null;
+    const row = document.createElement("tr");
+    row.dataset.row = String(index);
+    row.dataset.key = savedMeasurement?.key || "";
+    const rowNumber = document.createElement("td");
+    rowNumber.textContent = String(index + 1);
+    const objectCell = document.createElement("td");
+    const valueCell = document.createElement("td");
+    const objectInput = document.createElement("input");
+    objectInput.type = "text";
+    objectInput.value = savedMeasurement?.label || "";
+    objectInput.placeholder = index === savedMeasurements.length ? "AB hoặc ∠ABC" : "";
+    objectInput.setAttribute("aria-label", `Đối tượng ở dòng ${index + 1}`);
+    const valueInput = document.createElement("input");
+    valueInput.type = "text";
+    valueInput.value = savedMeasurement
+      ? `${savedMeasurement.value}${savedMeasurement.type === "angle" ? "°" : ""}`
+      : "";
+    valueInput.placeholder = index === savedMeasurements.length ? "a, a√2, 60°" : "";
+    valueInput.setAttribute("aria-label", `Giá trị ở dòng ${index + 1}`);
+
+    const commit = async () => {
+      const saved = await commitMeasurementRow(row, objectInput, valueInput);
+      return saved;
+    };
+    [objectInput, valueInput].forEach((input) => {
+      input.addEventListener("change", commit);
+      input.addEventListener("keydown", async (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        const saved = await commit();
+        if (!saved) return;
+        measurementSheetBody
+          .querySelector(`tr[data-row="${index + 1}"] input`)
+          ?.focus();
+      });
+    });
+
+    objectCell.appendChild(objectInput);
+    valueCell.appendChild(valueInput);
+    row.append(rowNumber, objectCell, valueCell);
+    measurementSheetBody.appendChild(row);
+  }
+}
+
+function updateLengthMeasurement(geometry, target, requestedLength) {
+  const from = getGeometryPoint(geometry, target.from);
+  const to = getGeometryPoint(geometry, target.to);
+  if (!from || !to) return false;
+  const origin = geometryPointVector(from);
+  const direction = geometryPointVector(to).sub(origin);
+  if (direction.lengthSq() < 1e-10) return false;
+  setGeometryPointVector(to, origin.add(direction.normalize().multiplyScalar(requestedLength)));
+  return true;
+}
+
+function updateAngleMeasurement(geometry, target, requestedAngle) {
+  const a = getGeometryPoint(geometry, target.a);
+  const vertex = getGeometryPoint(geometry, target.vertex);
+  const c = getGeometryPoint(geometry, target.c);
+  if (!a || !vertex || !c) return false;
+  const vertexVector = geometryPointVector(vertex);
+  const firstRay = geometryPointVector(a).sub(vertexVector).normalize();
+  const currentSecondRay = geometryPointVector(c).sub(vertexVector);
+  const secondRayLength = currentSecondRay.length();
+  if (firstRay.lengthSq() < 1e-10 || secondRayLength < 1e-10) return false;
+
+  const perpendicular = currentSecondRay.clone()
+    .sub(firstRay.clone().multiplyScalar(currentSecondRay.dot(firstRay)));
+  if (perpendicular.lengthSq() < 1e-10) {
+    const fallback = Math.abs(firstRay.y) < 0.9
+      ? new THREE.Vector3(0, 1, 0)
+      : new THREE.Vector3(1, 0, 0);
+    perpendicular.copy(fallback.sub(firstRay.clone().multiplyScalar(fallback.dot(firstRay))));
+  }
+  perpendicular.normalize();
+  const angle = THREE.MathUtils.degToRad(requestedAngle);
+  const nextDirection = firstRay.multiplyScalar(Math.cos(angle))
+    .add(perpendicular.multiplyScalar(Math.sin(angle)))
+    .normalize();
+  setGeometryPointVector(c, vertexVector.add(nextDirection.multiplyScalar(secondRayLength)));
+  return true;
+}
+
+async function commitMeasurementRow(row, objectInput, valueInput) {
+  const geometry = currentSession.geometry;
+  const objectLabel = objectInput.value.trim();
+  const rawValue = valueInput.value.trim().replace(/°+$/, "").trim();
+  const previousKey = row.dataset.key;
+  if (!objectLabel && !rawValue) {
+    if (previousKey) {
+      currentSession.measurements = currentSession.measurements
+        .filter((measurement) => measurement.key !== previousKey);
+      saveSession();
+      renderMeasurementPanel(geometry);
+      measurementStatus.textContent = "Đã xóa dòng số đo.";
+    }
+    return true;
+  }
+  if (!objectLabel || !rawValue) return false;
+
+  const target = findMeasurementTarget(geometry, objectLabel);
+  const numericText = rawValue.replace(",", ".");
+  const isNumericValue = /^\d+(?:\.\d+)?$/.test(numericText);
+  const numericValue = isNumericValue ? Number(numericText) : NaN;
+  const validNumericValue = !isNumericValue
+    || (target?.type === "length"
+      ? numericValue > 0
+      : numericValue > 0 && numericValue < 180);
+  if (!geometry || !target || !rawValue || rawValue.length > 48 || !validNumericValue) {
+    measurementStatus.textContent = !target
+      ? "Đối tượng chưa có trong hình. Nhập như AB hoặc ∠ABC."
+      : "Giá trị chưa hợp lệ; góc số phải nằm từ 1° đến 179°.";
+    measurementStatus.classList.add("is-error");
+    row.classList.add("is-invalid");
+    return false;
+  }
+
+  if (previousKey && previousKey !== measurementTargetKey(target)) {
+    currentSession.measurements = currentSession.measurements
+      .filter((measurement) => measurement.key !== previousKey);
+  }
+  saveMeasurementConstraint(target, rawValue);
+  currentSession.updatedAt = new Date().toISOString();
+  row.classList.remove("is-invalid");
+
+  if (!isNumericValue) {
+    saveSession();
+    renderMeasurementPanel(geometry);
+    measurementStatus.textContent = `Đã lưu ${target.label} = ${rawValue} làm dữ kiện của bài.`;
+    measurementStatus.classList.remove("is-error");
+    parserNote.textContent = measurementStatus.textContent;
+    return true;
+  }
+
+  const updated = target.type === "length"
+    ? updateLengthMeasurement(geometry, target, numericValue)
+    : updateAngleMeasurement(geometry, target, numericValue);
+  if (!updated) return false;
+  buildAiGeometry(geometry, { fitCamera: false, renderMeasurements: true, updateStatus: false });
+  saveSession();
+  measurementStatus.textContent = `Đã cập nhật ${target.label} = ${rawValue}${target.type === "angle" ? "°" : ""}.`;
+  measurementStatus.classList.remove("is-error");
+  parserNote.textContent = measurementStatus.textContent;
+
+  try {
+    const response = await fetch("/api/geometry/repair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        original_problem: getProblemWithMeasurements() || "Cập nhật số đo thủ công",
+        current_geometry: geometry,
+        relation_context: [
+          currentSession.messages.map((message) => message.text).join("\n"),
+          getMeasurementContext(),
+        ].filter(Boolean).join("\n").slice(-12_000),
+      }),
+    });
+    const data = await response.json();
+    if (response.ok && data.geometry) {
+      currentSession.geometry = data.geometry;
+      buildAiGeometry(data.geometry, { fitCamera: false, updateStatus: false });
+      saveSession();
+      measurementStatus.textContent = `Đã cập nhật ${target.label} và tính lại các điểm phụ liên quan.`;
+    }
+  } catch {
+    // Giữ bản cập nhật cục bộ nếu bước kiểm tra quan hệ không hoàn tất.
+  }
+  return true;
+}
+
+function renderMotionControls(geometry) {
+  const movablePoints = getMovablePoints(geometry);
+  motionControlList.replaceChildren();
+  motionControls.hidden = movablePoints.length === 0;
+  if (!movablePoints.length) return;
+
+  movablePoints.forEach((point) => {
+    const row = document.createElement("div");
+    row.className = "motion-control-row";
+
+    const meta = document.createElement("div");
+    meta.className = "motion-control-meta";
+    const label = document.createElement("label");
+    label.htmlFor = `motion-${point.label}`;
+    label.textContent = `${point.label} trên ${point.path_from}${point.path_to}`;
+    const value = document.createElement("output");
+    value.htmlFor = label.htmlFor;
+
+    const range = document.createElement("input");
+    range.id = label.htmlFor;
+    range.type = "range";
+    range.min = "0";
+    range.max = "100";
+    range.step = "1";
+    range.value = String(Math.round(THREE.MathUtils.clamp(Number(point.position_ratio) || 0, 0, 1) * 100));
+    range.setAttribute("aria-label", `Vị trí điểm ${point.label} trên đoạn ${point.path_from}${point.path_to}`);
+
+    const endpoints = document.createElement("div");
+    endpoints.className = "motion-endpoints";
+    const fromLabel = document.createElement("span");
+    fromLabel.textContent = point.path_from;
+    const toLabel = document.createElement("span");
+    toLabel.textContent = point.path_to;
+    endpoints.append(fromLabel, toLabel);
+
+    const updateValue = () => {
+      const ratio = Number(range.value) / 100;
+      value.textContent = `t = ${ratio.toFixed(2)}`;
+      setPointOnMovementPath(geometry, point, ratio);
+      buildAiGeometry(geometry, {
+        fitCamera: false,
+        renderControls: false,
+        renderMeasurements: false,
+        updateStatus: false,
+      });
+    };
+
+    range.addEventListener("input", updateValue);
+    range.addEventListener("change", () => {
+      saveSession();
+      parserNote.textContent = `Đã đặt ${point.label} tại t = ${(Number(range.value) / 100).toFixed(2)} trên ${point.path_from}${point.path_to}.`;
+    });
+
+    value.textContent = `t = ${(Number(range.value) / 100).toFixed(2)}`;
+    meta.append(label, value);
+    row.append(meta, range, endpoints);
+    motionControlList.appendChild(row);
+  });
+}
+
+function buildAiGeometry(geometry, options = {}) {
   if (!geometry || !Array.isArray(geometry.points) || !Array.isArray(geometry.edges) || !Array.isArray(geometry.faces)) {
     throw new Error("Mô hình AI trả về không hợp lệ.");
   }
+
+  const {
+    fitCamera = true,
+    renderControls = true,
+    renderMeasurements = true,
+    updateStatus = true,
+  } = options;
+
+  getMovablePoints(geometry).forEach((point) => {
+    setPointOnMovementPath(geometry, point, point.position_ratio ?? 0.5);
+  });
 
   clearFigure();
   const points = {};
@@ -409,14 +841,21 @@ function buildAiGeometry(geometry) {
 
   if (!edgeDefinitions.length) throw new Error("AI chưa xác định được các cạnh của hình.");
 
-  fitCameraToPoints(points);
+  if (fitCamera) fitCameraToPoints(points);
   renderDynamicEdges();
   edgeVisibilityDirty = false;
-  status.textContent = geometry.title || "Hình đã dựng";
-  parserNote.textContent = "AI đã dựng xong. Nét khuất tự đổi khi xoay hình.";
+  if (renderControls) renderMotionControls(geometry);
+  if (renderMeasurements) renderMeasurementPanel(geometry);
+  if (updateStatus) {
+    status.textContent = geometry.title || "Hình đã dựng";
+    parserNote.textContent = getMovablePoints(geometry).length
+      ? "Kéo thanh điểm di động để khảo sát vị trí lớn nhất, nhỏ nhất."
+      : "AI đã dựng xong. Nét khuất tự đổi khi xoay hình.";
+  }
 }
 
 function drawLocally(text) {
+  clearMotionControls();
   clearFigure();
   let result;
   if (/hình hộp|lập phương|lăng trụ/i.test(text)) result = buildCube(text);
@@ -434,6 +873,8 @@ function createEmptySession() {
     responseId: null,
     geometry: null,
     messages: [],
+    measurements: [],
+    tutorActive: false,
     updatedAt: null,
   };
 }
@@ -451,11 +892,29 @@ function loadSession() {
   try {
     const saved = JSON.parse(localStorage.getItem(storageKey));
     if (!saved?.geometry || !Array.isArray(saved.messages)) return false;
+    const lastSavedMessage = saved.messages.at(-1);
+    const inferredTutorActive = lastSavedMessage?.type === "assistant"
+      && /(?:Câu hỏi cho em|\?\s*$)/i.test(String(lastSavedMessage.text || ""));
     currentSession = {
       originalProblem: String(saved.originalProblem || ""),
       responseId: typeof saved.responseId === "string" ? saved.responseId : null,
       geometry: saved.geometry,
-      messages: saved.messages.filter((message) => message?.text && ["user", "assistant"].includes(message.type)),
+      messages: saved.messages
+        .filter((message) => message?.text && ["user", "assistant"].includes(message.type))
+        .map((message) => ({
+          ...message,
+          text: normalizeControlMathDelimiters(message.text),
+        })),
+      measurements: Array.isArray(saved.measurements)
+        ? saved.measurements.filter((measurement) => (
+          measurement
+          && typeof measurement.key === "string"
+          && ["length", "angle"].includes(measurement.type)
+          && typeof measurement.label === "string"
+          && typeof measurement.value === "string"
+        )).slice(-80)
+        : [],
+      tutorActive: typeof saved.tutorActive === "boolean" ? saved.tutorActive : inferredTutorActive,
       updatedAt: saved.updatedAt || null,
     };
     return true;
@@ -483,8 +942,29 @@ function normalizeLegacyMath(value) {
     .replace(/(?<!\\)\(([A-Z][A-Z0-9.′'’]*)\)/g, "\\($1\\)");
 }
 
+function normalizeControlMathDelimiters(value) {
+  const wrapMath = (_match, expression) => {
+    const cleanExpression = String(expression)
+      .trim()
+      .replace(/^\\?\(\s*/, "")
+      .replace(/\s*\\?\)$/, "")
+      .trim();
+    return cleanExpression ? `\\(${cleanExpression}\\)` : "";
+  };
+
+  return String(value)
+    // Một số phản hồi mô hình dùng ký tự điều khiển như cặp phân cách công thức.
+    .replace(/[\u000E\u0010]([\s\S]*?)[\u000F\u0011]/g, wrapMath)
+    // Cũng xử lý trường hợp mã điều khiển bị lưu thành chuỗi "\\u0010".
+    .replace(/(?:\\u0010|\\x10)([\s\S]*?)(?:\\u0011|\\x11)/gi, wrapMath)
+    // Xóa mọi ký tự điều khiển còn sót, nhưng giữ tab và xuống dòng.
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uFFFC\uFFFD]/g, "")
+    .replace(/\\(?:u00(?:0[0-8BCEF]|1[0-9A-F])|x(?:0[0-8BCEF]|1[0-9A-F]|7F))/gi, "");
+}
+
 function normalizeGeometryMath(value) {
-  return normalizeLegacyMath(String(value))
+  return normalizeLegacyMath(normalizeControlMathDelimiters(value))
+    .replace(/≡\s*([^≡\n]+?)\s*≡/g, "\\($1\\)")
     .replace(/\\{2,}(?=[A-Za-z()[\]\s])/g, "\\")
     .replace(/\\\s+([()[\]])/g, "\\$1")
     .replace(/\b([A-Z][A-Z0-9′'’]*)\s*(?:\/\/|∥)\s*([A-Z][A-Z0-9′'’]*)\b/g, "\\($1 \\parallel $2\\)")
@@ -587,6 +1067,7 @@ function renderChatContent(value) {
 }
 
 function appendMessage(text, type, record = true) {
+  const safeText = normalizeControlMathDelimiters(text);
   const message = document.createElement("div");
   message.className = `chat-message ${type}-message`;
   const avatar = document.createElement("span");
@@ -595,12 +1076,12 @@ function appendMessage(text, type, record = true) {
   avatar.textContent = type === "assistant" ? "AI" : "B";
   const content = document.createElement("div");
   content.className = "chat-content";
-  content.innerHTML = renderChatContent(text);
+  content.innerHTML = renderChatContent(safeText);
   message.append(avatar, content);
   chatLog.appendChild(message);
   chatLog.scrollTop = chatLog.scrollHeight;
   if (record) {
-    currentSession.messages.push({ text, type });
+    currentSession.messages.push({ text: safeText, type });
     currentSession.updatedAt = new Date().toISOString();
     saveSession();
   }
@@ -612,31 +1093,127 @@ function setLoading(loading, action = "draw") {
   newProblemButton.disabled = loading;
   drawButton.classList.toggle("is-loading", loading && action === "draw");
   explainButton.classList.toggle("is-loading", loading && action === "explain");
+  explainButton.classList.add("is-answer-mode");
   buttonLabel.textContent = loading && action === "draw" ? "Đang dựng…" : "Dựng hình";
-  explainLabel.textContent = loading && action === "explain" ? "Đang giảng…" : "Giảng bài";
+  explainLabel.textContent = loading && action === "explain" ? "AI đang suy nghĩ" : "Gửi câu hỏi hoặc câu trả lời";
+  explainIcon.textContent = "↑";
+  explainButton.setAttribute("aria-label", explainLabel.textContent);
   if (loading) {
     statusBeforeLoading = status.textContent;
-    status.textContent = action === "draw" ? "Đang dựng hình…" : "Đang giảng bài…";
+    status.textContent = action === "draw" ? "Đang dựng hình…" : "AI đang suy nghĩ…";
   } else if (status.textContent.startsWith("Đang ")) {
     status.textContent = statusBeforeLoading;
   }
 }
 
 function updateComposerForContext() {
-  problemInput.placeholder = "Nhập đề bài hoặc câu hỏi…";
+  problemInput.placeholder = currentSession.tutorActive
+    ? "Nhập câu trả lời hoặc hỏi thêm…"
+    : "Hỏi AI về bài này…";
   buttonLabel.textContent = "Dựng hình";
-  explainLabel.textContent = "Giảng bài";
+  explainLabel.textContent = "Gửi câu hỏi hoặc câu trả lời";
+  explainIcon.textContent = "↑";
+  explainButton.setAttribute("aria-label", explainLabel.textContent);
+  explainButton.classList.add("is-answer-mode");
+}
+
+function setOcrLoading(loading) {
+  problemImageInput.disabled = loading;
+  drawButton.disabled = loading;
+  explainButton.disabled = loading;
+  newProblemButton.disabled = loading;
+  imageUploadButton.classList.toggle("is-reading", loading);
+  imageUploadLabel.textContent = loading ? "Đang đọc…" : "Ảnh";
+}
+
+function clearOcrPreview(cancelRequest = true) {
+  if (cancelRequest && ocrController) ocrController.abort();
+  ocrController = null;
+  if (ocrPreviewUrl) URL.revokeObjectURL(ocrPreviewUrl);
+  ocrPreviewUrl = null;
+  problemImageInput.value = "";
+  ocrPreviewImage.removeAttribute("src");
+  ocrFileName.textContent = "";
+  ocrStatus.textContent = "Sẵn sàng đọc đề";
+  ocrStatus.classList.remove("is-error");
+  ocrPreview.hidden = true;
+  setOcrLoading(false);
+}
+
+async function readProblemImage(file) {
+  if (!file) return;
+  const supportedTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
+  if (!supportedTypes.has(file.type)) {
+    status.textContent = "Chỉ hỗ trợ ảnh JPG, PNG hoặc WebP";
+    problemImageInput.value = "";
+    return;
+  }
+  if (file.size > 12 * 1024 * 1024) {
+    status.textContent = "Ảnh phải nhỏ hơn 12 MB";
+    problemImageInput.value = "";
+    return;
+  }
+
+  clearOcrPreview();
+  ocrPreviewUrl = URL.createObjectURL(file);
+  ocrPreviewImage.src = ocrPreviewUrl;
+  ocrFileName.textContent = file.name;
+  ocrStatus.textContent = "Chandra OCR 2 đang trích xuất đề bài…";
+  ocrStatus.classList.remove("is-error");
+  ocrPreview.hidden = false;
+
+  const controller = new AbortController();
+  ocrController = controller;
+  setOcrLoading(true);
+
+  try {
+    const form = new FormData();
+    form.append("image", file, file.name);
+    const response = await fetch("/api/ocr", {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Không thể đọc đề bài từ ảnh.");
+
+    problemInput.value = String(data.text || "").trim();
+    problemInput.dispatchEvent(new Event("input", { bubbles: true }));
+    ocrStatus.textContent = "Đã trích xuất đề bài — có thể chỉnh sửa trước khi gửi";
+    status.textContent = "Đã đọc đề từ ảnh";
+    problemInput.focus();
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    ocrStatus.textContent = error.message || "Không thể đọc đề bài từ ảnh.";
+    ocrStatus.classList.add("is-error");
+    status.textContent = "OCR chưa hoàn tất";
+  } finally {
+    if (ocrController === controller) {
+      ocrController = null;
+      setOcrLoading(false);
+    }
+  }
 }
 
 function startNewProblem(focusInput = true) {
+  clearOcrPreview();
+  problemExpanded = false;
+  measurementPanelOpen = false;
   currentSession = createEmptySession();
   saveSession();
   clearFigure();
+  clearMotionControls();
+  measurementPanel.hidden = true;
+  measurementToggle.disabled = true;
+  measurementToggle.setAttribute("aria-expanded", "false");
+  measurementCount.hidden = true;
   resetChat();
   problemInput.value = "";
+  resizeProblemInput();
   status.textContent = "Sẵn sàng";
   parserNote.textContent = "Đã xóa ngữ cảnh cũ. Hãy nhập đề bài mới.";
   grid.position.y = -1.75;
+  updateProblemStatement();
   updateComposerForContext();
   if (focusInput) problemInput.focus();
 }
@@ -644,12 +1221,40 @@ function startNewProblem(focusInput = true) {
 function restoreSavedProblem() {
   if (!loadSession()) return false;
   resetChat();
+  updateProblemStatement();
   currentSession.messages.forEach((message) => appendMessage(message.text, message.type, false));
   buildAiGeometry(currentSession.geometry);
   problemInput.value = "";
+  resizeProblemInput();
   parserNote.textContent = "Đã khôi phục ngữ cảnh bài đang làm. Bạn có thể yêu cầu xóa hoặc vẽ thêm.";
   updateComposerForContext();
   return true;
+}
+
+async function repairRestoredGeometry() {
+  if (!currentSession.geometry || !currentSession.originalProblem) return;
+  try {
+    const response = await fetch("/api/geometry/repair", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        original_problem: getProblemWithMeasurements(),
+        current_geometry: currentSession.geometry,
+        relation_context: [
+          currentSession.messages.map((message) => message.text).join("\n"),
+          getMeasurementContext(),
+        ].filter(Boolean).join("\n").slice(-12_000),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.geometry) return;
+    currentSession.geometry = data.geometry;
+    buildAiGeometry(data.geometry);
+    saveSession();
+    parserNote.textContent = "Đã kiểm tra lại trung điểm, giao điểm, hình chiếu và điểm di động bằng tọa độ.";
+  } catch {
+    // Giữ nguyên mô hình đã lưu nếu việc kiểm tra cục bộ không hoàn tất.
+  }
 }
 
 async function submitProblem() {
@@ -661,6 +1266,7 @@ async function submitProblem() {
   }
 
   problemInput.value = "";
+  resizeProblemInput();
   const hasContext = Boolean(currentSession.geometry);
   appendMessage(text, "user");
   setLoading(true, "draw");
@@ -674,7 +1280,7 @@ async function submitProblem() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: text,
-        original_problem: currentSession.originalProblem,
+        original_problem: getProblemWithMeasurements(),
         previous_response_id: currentSession.responseId,
         current_geometry: currentSession.geometry,
       }),
@@ -682,11 +1288,13 @@ async function submitProblem() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Không thể kết nối với trợ lý AI.");
 
-    buildAiGeometry(data.geometry);
     currentSession.originalProblem ||= text;
     currentSession.geometry = data.geometry;
     currentSession.responseId = data.response_id || null;
     currentSession.updatedAt = new Date().toISOString();
+    if (!hasContext) problemExpanded = false;
+    updateProblemStatement();
+    buildAiGeometry(data.geometry);
     appendMessage(data.geometry.assistant_message || "Mình đã dựng xong hình từ đề bài.", "assistant");
     saveSession();
     updateComposerForContext();
@@ -706,35 +1314,78 @@ async function submitProblem() {
 
 async function explainProblem() {
   const text = problemInput.value.trim();
-  const question = text || (currentSession.originalProblem ? "Giảng bài này" : "");
-  if (!question) {
-    parserNote.textContent = "Hãy nhập đề bài hoặc câu hỏi cần giảng.";
+  if (!text) {
+    parserNote.textContent = "Hãy nhập câu hỏi hoặc câu trả lời trước khi gửi.";
     problemInput.focus();
     return;
   }
+  const question = text;
 
   problemInput.value = "";
+  resizeProblemInput();
   appendMessage(question, "user");
   setLoading(true, "explain");
-  parserNote.textContent = "AI đang giảng bài…";
+  parserNote.textContent = "AI đang xem phần em vừa hỏi…";
 
   try {
+    const looksLikeFullProblem = /hình\s+(?:chóp|hộp|lập phương|lăng trụ)|tứ diện/i.test(question);
+    if (!currentSession.geometry && looksLikeFullProblem) {
+      parserNote.textContent = "Đang dựng hình nền trước bước gợi mở đầu tiên…";
+      const geometryResponse = await fetch("/api/geometry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: question,
+          original_problem: "",
+          previous_response_id: null,
+          current_geometry: null,
+        }),
+      });
+      const geometryData = await geometryResponse.json();
+      if (!geometryResponse.ok) {
+        throw new Error(geometryData.error || "Không thể dựng hình nền cho câu hỏi.");
+      }
+      currentSession.originalProblem = question;
+      currentSession.geometry = geometryData.geometry;
+      currentSession.responseId = geometryData.response_id || null;
+      updateProblemStatement();
+      buildAiGeometry(geometryData.geometry);
+      saveSession();
+      parserNote.textContent = "Đang chuẩn bị câu hỏi gợi mở đầu tiên…";
+    }
+
     const response = await fetch("/api/explain", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message: question,
-        original_problem: currentSession.originalProblem,
+        original_problem: getProblemWithMeasurements(),
         current_geometry: currentSession.geometry,
+        conversation: currentSession.messages,
       }),
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Không thể kết nối với trợ lý AI.");
+    currentSession.tutorActive = data.student_status !== "completed";
     appendMessage(data.answer, "assistant");
-    parserNote.textContent = "Đã trả lời xong.";
+    if (data.geometry_updated && data.geometry) {
+      currentSession.geometry = data.geometry;
+      buildAiGeometry(data.geometry);
+      saveSession();
+    }
+    const tutorStatus = {
+      correct: "Câu trả lời đúng — đã mở bước tiếp theo.",
+      partially_correct: "Câu trả lời đúng một phần — hãy bổ sung theo câu hỏi gợi mở.",
+      incorrect: "Chưa đúng — hãy thử lại từ gợi ý hiện tại.",
+      completed: "Bạn đã tự hoàn thành lời giải.",
+      no_attempt: "Đã mở bước suy luận đầu tiên.",
+    };
+    parserNote.textContent = tutorStatus[data.student_status] || "Đã đưa ra câu hỏi gợi mở tiếp theo.";
+    saveSession();
+    updateComposerForContext();
   } catch (error) {
     appendMessage(error.message, "assistant");
-    parserNote.textContent = "Không thể giảng bài lúc này.";
+    parserNote.textContent = "Không thể trả lời lúc này.";
   } finally {
     setLoading(false, "explain");
   }
@@ -755,6 +1406,18 @@ function resize() {
   edgeVisibilityDirty = true;
 }
 
+function resizeProblemInput() {
+  problemInput.style.height = "auto";
+  const nextHeight = Math.min(Math.max(problemInput.scrollHeight, 42), 180);
+  problemInput.style.height = `${nextHeight}px`;
+  problemInput.style.overflowY = problemInput.scrollHeight > 180 ? "auto" : "hidden";
+}
+
+function setMathPopover(open) {
+  mathPopover.hidden = !open;
+  mathToggleButton.setAttribute("aria-expanded", String(open));
+}
+
 function insertMathSymbol(symbol) {
   const start = problemInput.selectionStart ?? problemInput.value.length;
   const end = problemInput.selectionEnd ?? start;
@@ -763,14 +1426,78 @@ function insertMathSymbol(symbol) {
   problemInput.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+function getPastedImage(clipboardData) {
+  const imageItem = Array.from(clipboardData?.items || [])
+    .find((item) => item.kind === "file" && item.type.startsWith("image/"));
+  const pastedFile = imageItem?.getAsFile();
+  if (!pastedFile) return null;
+
+  const extensionByType = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+  };
+  const extension = extensionByType[pastedFile.type] || "png";
+  return new File(
+    [pastedFile],
+    "anh-de-bai-" + Date.now() + "." + extension,
+    { type: pastedFile.type || "image/png" },
+  );
+}
+
 drawButton.addEventListener("click", submitProblem);
 explainButton.addEventListener("click", explainProblem);
 newProblemButton.addEventListener("click", () => startNewProblem());
-mathSymbolButtons.forEach((button) => {
-  button.addEventListener("click", () => insertMathSymbol(button.dataset.symbol || ""));
+problemToggle.addEventListener("click", () => {
+  problemExpanded = !problemExpanded;
+  updateProblemStatement();
 });
+measurementToggle.addEventListener("click", () => {
+  if (!currentSession.geometry) return;
+  measurementPanelOpen = !measurementPanelOpen;
+  renderMeasurementPanel(currentSession.geometry);
+});
+measurementClose.addEventListener("click", () => {
+  measurementPanelOpen = false;
+  if (currentSession.geometry) renderMeasurementPanel(currentSession.geometry);
+});
+mathSymbolButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    insertMathSymbol(button.dataset.symbol || "");
+    setMathPopover(false);
+  });
+});
+mathToggleButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  setMathPopover(mathPopover.hidden);
+});
+problemImageInput.addEventListener("change", () => {
+  readProblemImage(problemImageInput.files?.[0]);
+});
+removeImageButton.addEventListener("click", () => clearOcrPreview());
+document.addEventListener("paste", (event) => {
+  const pastedImage = getPastedImage(event.clipboardData);
+  if (!pastedImage) return;
+  event.preventDefault();
+  readProblemImage(pastedImage);
+});
+document.addEventListener("click", (event) => {
+  if (mathPopover.hidden || mathPopover.contains(event.target)) return;
+  setMathPopover(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  setMathPopover(false);
+  if (measurementPanelOpen) {
+    measurementPanelOpen = false;
+    if (currentSession.geometry) renderMeasurementPanel(currentSession.geometry);
+  }
+});
+problemInput.addEventListener("input", resizeProblemInput);
 problemInput.addEventListener("keydown", (event) => {
-  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") submitProblem();
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  explainProblem();
 });
 resetButton.addEventListener("click", resetView);
 gridButton.addEventListener("click", () => {
@@ -783,6 +1510,7 @@ controls.addEventListener("change", () => {
 window.addEventListener("resize", resize);
 resetView();
 resize();
+resizeProblemInput();
 if (!restoreSavedProblem()) {
   resetChat();
   if (defaultProblem.trim()) drawLocally(defaultProblem);
@@ -791,6 +1519,8 @@ if (!restoreSavedProblem()) {
     status.textContent = "Sẵn sàng";
   }
   updateComposerForContext();
+} else {
+  repairRestoredGeometry();
 }
 
 renderer.setAnimationLoop(() => {

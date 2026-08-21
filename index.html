@@ -31,42 +31,151 @@
           <span id="shape-status">Sẵn sàng</span>
         </div>
 
+        <section id="problem-statement" class="problem-statement" aria-labelledby="problem-statement-title" hidden>
+          <div class="problem-statement-heading">
+            <span id="problem-statement-title">Đề bài</span>
+            <button id="problem-toggle" type="button" aria-expanded="false">Mở rộng</button>
+          </div>
+          <div id="problem-statement-content" class="problem-statement-content"></div>
+        </section>
+
         <div id="chat-log" class="chat-log" aria-live="polite"></div>
 
         <div class="composer">
           <label class="sr-only" for="problem-input">Nhập đề bài hoặc câu hỏi</label>
-          <div class="math-toolbar" role="toolbar" aria-label="Chèn ký hiệu toán học">
-            <span class="math-toolbar-label">Ký hiệu</span>
-            <div class="math-symbols">
-              <button type="button" data-symbol=" ∥ " aria-label="Song song" title="Song song">∥</button>
-              <button type="button" data-symbol=" ⟂ " aria-label="Vuông góc" title="Vuông góc">⟂</button>
-              <button type="button" data-symbol=" ∈ " aria-label="Thuộc" title="Thuộc">∈</button>
-              <button type="button" data-symbol=" ∉ " aria-label="Không thuộc" title="Không thuộc">∉</button>
-              <button type="button" data-symbol=" ∩ " aria-label="Giao" title="Giao">∩</button>
-              <button type="button" data-symbol=" ∪ " aria-label="Hợp" title="Hợp">∪</button>
-              <button type="button" data-symbol="∠" aria-label="Góc" title="Góc">∠</button>
-              <button type="button" data-symbol="△" aria-label="Tam giác" title="Tam giác">△</button>
-              <button type="button" data-symbol=" → " aria-label="Suy ra" title="Suy ra">→</button>
-              <button type="button" data-symbol=" ≡ " aria-label="Trùng nhau" title="Trùng nhau">≡</button>
-              <button type="button" data-symbol=" ≠ " aria-label="Khác" title="Khác">≠</button>
-              <button type="button" data-symbol=" ⊂ " aria-label="Là tập con" title="Là tập con">⊂</button>
-              <button type="button" data-symbol=" ≤ " aria-label="Nhỏ hơn hoặc bằng" title="Nhỏ hơn hoặc bằng">≤</button>
-              <button type="button" data-symbol=" ≥ " aria-label="Lớn hơn hoặc bằng" title="Lớn hơn hoặc bằng">≥</button>
-              <button type="button" data-symbol="²" aria-label="Bình phương" title="Bình phương">x²</button>
+          <div id="ocr-preview" class="ocr-preview" hidden>
+            <img id="ocr-preview-image" alt="Ảnh đề bài đã chọn" />
+            <div class="ocr-preview-copy">
+              <strong id="ocr-file-name"></strong>
+              <span id="ocr-status" role="status">Sẵn sàng đọc đề</span>
             </div>
+            <button id="remove-image" type="button" aria-label="Bỏ ảnh đề bài">×</button>
           </div>
-          <textarea id="problem-input" rows="4" spellcheck="false" placeholder="Nhập đề bài hoặc câu hỏi..."></textarea>
-          <div class="composer-actions">
-            <button id="explain-button" class="explain-button" type="button">
-              <span aria-hidden="true">✦</span>
-              <span class="explain-label">Giảng bài</span>
-              <span class="button-loader" aria-hidden="true"></span>
-            </button>
-            <button id="draw-button" class="draw-button" type="button">
-              <span class="button-label">Dựng hình</span>
-              <span class="button-loader" aria-hidden="true"></span>
-              <span aria-hidden="true">→</span>
-            </button>
+          <div class="composer-input-shell">
+            <textarea id="problem-input" rows="1" spellcheck="false" placeholder="Nhập đề bài hoặc câu hỏi..."></textarea>
+            <div id="math-popover" class="math-toolbar" role="toolbar" aria-label="Chèn ký hiệu toán học" hidden>
+              <span class="math-toolbar-label">Ký hiệu toán học</span>
+              <div class="math-symbols">
+                <div class="math-symbol-group">
+                  <span>Căn &amp; lũy thừa</span>
+                  <div class="math-symbol-grid">
+                    <button type="button" data-symbol="√" aria-label="Căn bậc hai" title="Căn bậc hai">√</button>
+                    <button type="button" data-symbol="∛" aria-label="Căn bậc ba" title="Căn bậc ba">∛</button>
+                    <button type="button" data-symbol="∜" aria-label="Căn bậc bốn" title="Căn bậc bốn">∜</button>
+                    <button type="button" data-symbol="²" aria-label="Mũ hai" title="Mũ hai">x²</button>
+                    <button type="button" data-symbol="³" aria-label="Mũ ba" title="Mũ ba">x³</button>
+                    <button type="button" data-symbol="ⁿ" aria-label="Mũ n" title="Mũ n">xⁿ</button>
+                    <button type="button" data-symbol="⁻¹" aria-label="Mũ âm một" title="Mũ âm một">x⁻¹</button>
+                    <button type="button" data-symbol="⁰" aria-label="Mũ không" title="Mũ không">x⁰</button>
+                    <button type="button" data-symbol="⁴" aria-label="Mũ bốn" title="Mũ bốn">x⁴</button>
+                    <button type="button" data-symbol="⁵" aria-label="Mũ năm" title="Mũ năm">x⁵</button>
+                    <button type="button" data-symbol="⁶" aria-label="Mũ sáu" title="Mũ sáu">x⁶</button>
+                    <button type="button" data-symbol="⁷" aria-label="Mũ bảy" title="Mũ bảy">x⁷</button>
+                    <button type="button" data-symbol="⁸" aria-label="Mũ tám" title="Mũ tám">x⁸</button>
+                    <button type="button" data-symbol="⁹" aria-label="Mũ chín" title="Mũ chín">x⁹</button>
+                    <button type="button" data-symbol="₁" aria-label="Chỉ số dưới một" title="Chỉ số dưới một">x₁</button>
+                    <button type="button" data-symbol="ₙ" aria-label="Chỉ số dưới n" title="Chỉ số dưới n">xₙ</button>
+                  </div>
+                </div>
+                <div class="math-symbol-group">
+                  <span>Phép toán &amp; so sánh</span>
+                  <div class="math-symbol-grid">
+                    <button type="button" data-symbol=" + " aria-label="Cộng" title="Cộng">+</button>
+                    <button type="button" data-symbol=" − " aria-label="Trừ" title="Trừ">−</button>
+                    <button type="button" data-symbol=" × " aria-label="Nhân" title="Nhân">×</button>
+                    <button type="button" data-symbol=" ÷ " aria-label="Chia" title="Chia">÷</button>
+                    <button type="button" data-symbol="⁄" aria-label="Gạch phân số" title="Gạch phân số">a⁄b</button>
+                    <button type="button" data-symbol=" ± " aria-label="Cộng hoặc trừ" title="Cộng hoặc trừ">±</button>
+                    <button type="button" data-symbol=" = " aria-label="Bằng" title="Bằng">=</button>
+                    <button type="button" data-symbol=" ≠ " aria-label="Khác" title="Khác">≠</button>
+                    <button type="button" data-symbol=" ≈ " aria-label="Xấp xỉ" title="Xấp xỉ">≈</button>
+                    <button type="button" data-symbol=" ≡ " aria-label="Đồng nhất" title="Đồng nhất">≡</button>
+                    <button type="button" data-symbol=" &lt; " aria-label="Nhỏ hơn" title="Nhỏ hơn">&lt;</button>
+                    <button type="button" data-symbol=" &gt; " aria-label="Lớn hơn" title="Lớn hơn">&gt;</button>
+                    <button type="button" data-symbol=" ≤ " aria-label="Nhỏ hơn hoặc bằng" title="Nhỏ hơn hoặc bằng">≤</button>
+                    <button type="button" data-symbol=" ≥ " aria-label="Lớn hơn hoặc bằng" title="Lớn hơn hoặc bằng">≥</button>
+                    <button type="button" data-symbol=" ∞ " aria-label="Vô cực" title="Vô cực">∞</button>
+                    <button type="button" data-symbol=" % " aria-label="Phần trăm" title="Phần trăm">%</button>
+                  </div>
+                </div>
+                <div class="math-symbol-group">
+                  <span>Hình học</span>
+                  <div class="math-symbol-grid">
+                    <button type="button" data-symbol=" ∥ " aria-label="Song song" title="Song song">∥</button>
+                    <button type="button" data-symbol=" ⟂ " aria-label="Vuông góc" title="Vuông góc">⟂</button>
+                    <button type="button" data-symbol="∠" aria-label="Góc" title="Góc">∠</button>
+                    <button type="button" data-symbol="△" aria-label="Tam giác" title="Tam giác">△</button>
+                    <button type="button" data-symbol=" ° " aria-label="Độ" title="Độ">°</button>
+                    <button type="button" data-symbol=" ⊙ " aria-label="Đường tròn" title="Đường tròn">⊙</button>
+                    <button type="button" data-symbol=" ⌒ " aria-label="Cung" title="Cung">⌒</button>
+                    <button type="button" data-symbol=" → " aria-label="Suy ra" title="Suy ra">→</button>
+                    <button type="button" data-symbol=" ↔ " aria-label="Tương đương" title="Tương đương">↔</button>
+                    <button type="button" data-symbol=" ⇒ " aria-label="Kéo theo" title="Kéo theo">⇒</button>
+                    <button type="button" data-symbol=" ⇔ " aria-label="Khi và chỉ khi" title="Khi và chỉ khi">⇔</button>
+                    <button type="button" data-symbol=" ⃗" aria-label="Ký hiệu vectơ" title="Ký hiệu vectơ">a⃗</button>
+                  </div>
+                </div>
+                <div class="math-symbol-group">
+                  <span>Tập hợp &amp; logic</span>
+                  <div class="math-symbol-grid">
+                    <button type="button" data-symbol=" ∈ " aria-label="Thuộc" title="Thuộc">∈</button>
+                    <button type="button" data-symbol=" ∉ " aria-label="Không thuộc" title="Không thuộc">∉</button>
+                    <button type="button" data-symbol=" ∩ " aria-label="Giao" title="Giao">∩</button>
+                    <button type="button" data-symbol=" ∪ " aria-label="Hợp" title="Hợp">∪</button>
+                    <button type="button" data-symbol=" ⊂ " aria-label="Tập con" title="Tập con">⊂</button>
+                    <button type="button" data-symbol=" ⊆ " aria-label="Tập con hoặc bằng" title="Tập con hoặc bằng">⊆</button>
+                    <button type="button" data-symbol=" ⊃ " aria-label="Tập chứa" title="Tập chứa">⊃</button>
+                    <button type="button" data-symbol=" ∅ " aria-label="Tập rỗng" title="Tập rỗng">∅</button>
+                    <button type="button" data-symbol=" ∀ " aria-label="Với mọi" title="Với mọi">∀</button>
+                    <button type="button" data-symbol=" ∃ " aria-label="Tồn tại" title="Tồn tại">∃</button>
+                    <button type="button" data-symbol=" ∴ " aria-label="Do đó" title="Do đó">∴</button>
+                    <button type="button" data-symbol=" ∵ " aria-label="Bởi vì" title="Bởi vì">∵</button>
+                  </div>
+                </div>
+                <div class="math-symbol-group">
+                  <span>Chữ Hy Lạp</span>
+                  <div class="math-symbol-grid">
+                    <button type="button" data-symbol="α" aria-label="Alpha" title="Alpha">α</button>
+                    <button type="button" data-symbol="β" aria-label="Beta" title="Beta">β</button>
+                    <button type="button" data-symbol="γ" aria-label="Gamma" title="Gamma">γ</button>
+                    <button type="button" data-symbol="δ" aria-label="Delta thường" title="Delta thường">δ</button>
+                    <button type="button" data-symbol="θ" aria-label="Theta" title="Theta">θ</button>
+                    <button type="button" data-symbol="λ" aria-label="Lambda" title="Lambda">λ</button>
+                    <button type="button" data-symbol="μ" aria-label="Mu" title="Mu">μ</button>
+                    <button type="button" data-symbol="π" aria-label="Pi" title="Pi">π</button>
+                    <button type="button" data-symbol="φ" aria-label="Phi" title="Phi">φ</button>
+                    <button type="button" data-symbol="ω" aria-label="Omega" title="Omega">ω</button>
+                    <button type="button" data-symbol="Δ" aria-label="Delta" title="Delta">Δ</button>
+                    <button type="button" data-symbol="Ω" aria-label="Omega hoa" title="Omega hoa">Ω</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="composer-bottom-row">
+              <div class="composer-tools">
+                <div class="ocr-tools">
+                  <label class="image-upload-button" for="problem-image" title="Tải hoặc dán ảnh đề bài">
+                    <span class="upload-icon" aria-hidden="true">＋</span>
+                    <span id="image-upload-label">Ảnh</span>
+                  </label>
+                  <input id="problem-image" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" />
+                  <span class="ocr-provider sr-only">Chandra OCR 2</span>
+                </div>
+                <button id="math-toggle" class="math-toggle" type="button" aria-expanded="false" aria-controls="math-popover" title="Chèn ký hiệu toán học">∑</button>
+              </div>
+              <div class="composer-actions">
+                <button id="explain-button" class="explain-button" type="button" aria-label="Gửi câu hỏi hoặc câu trả lời" title="Gửi (Enter)">
+                  <span aria-hidden="true">↑</span>
+                  <span class="explain-label sr-only">Gửi câu hỏi hoặc câu trả lời</span>
+                  <span class="button-loader" aria-hidden="true"></span>
+                </button>
+                <button id="draw-button" class="draw-button" type="button">
+                  <span class="button-label">Dựng hình</span>
+                  <span class="button-loader" aria-hidden="true"></span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            </div>
           </div>
           <p id="parser-note" class="sr-only" role="status"></p>
         </div>
@@ -76,6 +185,11 @@
         <header class="scene-toolbar">
           <span>Không gian 3D</span>
           <div class="scene-actions">
+            <button id="toggle-measurements" class="icon-button" type="button" aria-expanded="false" aria-controls="measurement-panel" disabled>
+              <span class="measure-icon" aria-hidden="true">⌗</span>
+              <span>Số đo</span>
+              <span id="measurement-count" class="measurement-count" hidden>0</span>
+            </button>
             <button id="toggle-grid" class="icon-button" type="button" aria-pressed="true">
               <span class="grid-icon" aria-hidden="true"></span>
               <span>Lưới</span>
@@ -87,6 +201,35 @@
           </div>
         </header>
         <div id="canvas-wrap" class="canvas-wrap"></div>
+        <section id="motion-controls" class="motion-controls" aria-label="Điều khiển điểm di động" hidden>
+          <div class="motion-controls-heading">
+            <span>Điểm di động</span>
+            <small>Kéo để thay đổi vị trí</small>
+          </div>
+          <div id="motion-control-list" class="motion-control-list"></div>
+        </section>
+        <section id="measurement-panel" class="measurement-panel" aria-labelledby="measurement-title" hidden>
+          <div class="measurement-heading">
+            <div>
+              <span id="measurement-title">Số đo</span>
+              <small>Enter để lưu</small>
+            </div>
+            <button id="close-measurements" type="button" aria-label="Đóng bảng số đo">×</button>
+          </div>
+          <div class="measurement-sheet-wrap">
+            <table class="measurement-sheet" aria-label="Bảng số đo hình học">
+              <thead>
+                <tr>
+                  <th class="sheet-row-number" aria-label="Số dòng"></th>
+                  <th scope="col">Đối tượng</th>
+                  <th scope="col">Giá trị</th>
+                </tr>
+              </thead>
+              <tbody id="measurement-sheet-body"></tbody>
+            </table>
+          </div>
+          <p id="measurement-status" class="measurement-status" role="status"></p>
+        </section>
       </section>
     </main>
 
